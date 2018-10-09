@@ -6,6 +6,13 @@ PX4 computer vision algorithms packaged as ROS nodes for depth sensor fusion and
   
 **The full PX4 Developer documentation is available on: https://dev.px4.io and includes more computer vision (including VIO) examples.**
 
+## Bi-weekly Dev Call
+The active developers of the avoidance repo are syncing up on a bi-weekly basis on the WG dev call.
+
+* Join the call: https://zoom.us/j/506512712
+* Time: Tuesday, 10AM CET
+* Meeting ID: 506512712
+* Dronecode calendar: https://www.dronecode.org/calendar/
 
 [![PX4 Avoidance video](http://img.youtube.com/vi/VqZkAWSl_U0/0.jpg)](https://www.youtube.com/watch?v=VqZkAWSl_U0)
 
@@ -59,7 +66,7 @@ mkdir -p ~/catkin_ws/src
 5. Install mavros. The package coming from the ROS repository should be fine. Just in case, instructions to install it from sources can be found here: https://dev.px4.io/en/ros/mavros_installation.html.
 
 ```bash
-apt install ros-kinetic-mavros
+apt install ros-kinetic-mavros ros-kinetic-mavros-extras
 ```
 
 6. Install avoidance module dependencies (pointcloud library and octomap).
@@ -342,4 +349,4 @@ roslaunch global_planner global_planner_offboard.launch point_cloud_topic:=<poin
 
 # Running on Odroid
 
-Read the [Running on Odroid](https://github.com/PX4/avoidance/blob/global_planner/resource/odroid/README.md) instructions
+Read the [Running on Odroid](https://github.com/PX4/avoidance/tree/master/global_planner/resource/odroid) instructions.

@@ -39,7 +39,7 @@ std::vector<P> threePointBezier(const P& p0, const P& p1, const P& p2,
 template <typename Path>
 nav_msgs::Path threePointBezier(const Path& path, int num_steps = 10) {
   if (path.poses.size() != 3) {
-    printf("Path size error, %d != 3 \n", path.poses.size());
+    printf("Path size error, %d != 3 \n", static_cast<int>(path.poses.size()));
     return path;
   }
   auto new_path = path;
@@ -126,7 +126,7 @@ double getAccelerationMagnitude(const P& p0, const P& p1, const P& p2,
 }
 
 template <typename BezierMsg>
-void pathToTriplets(const nav_msgs::Path& path, std::vector<BezierMsg> triplets,
+nav_msgs::Path pathToTriplets(const nav_msgs::Path& path, std::vector<BezierMsg> triplets,
                     std::vector<double> speed) {
   if (path.poses.size() < 3) {
     return path;

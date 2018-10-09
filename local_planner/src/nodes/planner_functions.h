@@ -40,8 +40,6 @@
 #include <nav_msgs/GridCells.h>
 #include <nav_msgs/Path.h>
 
-#include <opencv2/imgproc/imgproc.hpp>
-
 void initGridCells(nav_msgs::GridCells *cell);
 void calculateSphere(geometry_msgs::Point &sphere_center, int &sphere_age,
                      geometry_msgs::Point temp_centerpoint,
@@ -53,10 +51,10 @@ void filterPointCloud(pcl::PointCloud<pcl::PointXYZ> &cropped_cloud,
                       geometry_msgs::Point &temp_sphere_center,
                       double &distance_to_closest_point, int &counter_backoff,
                       int &counter_sphere,
-                      pcl::PointCloud<pcl::PointXYZ> complete_cloud,
+					  std::vector<pcl::PointCloud<pcl::PointXYZ>> complete_cloud,
                       double min_cloud_size, double min_dist_backoff,
                       double sphere_radius, Box histogram_box,
-                      geometry_msgs::Point position);
+                      geometry_msgs::Point position, double min_realsense_dist);
 void calculateFOV(std::vector<int> &z_FOV_idx, int &e_FOV_min, int &e_FOV_max,
                   double yaw, double pitch);
 void propagateHistogram(Histogram &polar_histogram_est,
@@ -80,12 +78,12 @@ double costFunction(int e, int z, nav_msgs::GridCells path_waypoints,
                     double height_change_cost_param_adapted,
                     double height_change_cost_param, bool only_yawed);
 void findFreeDirections(
-    Histogram histogram, double safety_radius,
+    const Histogram &histogram, double safety_radius,
     nav_msgs::GridCells &path_candidates, nav_msgs::GridCells &path_selected,
     nav_msgs::GridCells &path_rejected, nav_msgs::GridCells &path_blocked,
     nav_msgs::GridCells &path_ground, nav_msgs::GridCells path_waypoints,
-    std::vector<float> &cost_path_candidates, geometry_msgs::Point goal,
-    geometry_msgs::PoseStamped position, geometry_msgs::Point position_old,
+    std::vector<float> &cost_path_candidates, const geometry_msgs::Point &goal,
+    const geometry_msgs::PoseStamped &position, const geometry_msgs::Point &position_old,
     double goal_cost_param, double smooth_cost_param,
     double height_change_cost_param_adapted, double height_change_cost_param,
     int e_min_idx, bool over_obstacle, bool only_yawed, int resolution_alpha);
@@ -94,11 +92,12 @@ void printHistogram(Histogram hist, std::vector<int> z_FOV_idx, int e_FOV_min,
                     double resolution);
 bool calculateCostMap(std::vector<float> cost_path_candidates,
                       std::vector<int> &cost_idx_sorted);
-bool getDirectionFromTree(geometry_msgs::Point &p, bool tree_available,
+bool getDirectionFromTree(geometry_msgs::Point &p,
                           std::vector<geometry_msgs::Point> path_node_positions,
-                          geometry_msgs::Point position, bool new_tree);
-geometry_msgs::Vector3Stamped getSphereAdaptedWaypoint(
-    geometry_msgs::Point position, geometry_msgs::Vector3Stamped wp,
+                          geometry_msgs::Point position,
+                          geometry_msgs::Point goal);
+geometry_msgs::Point getSphereAdaptedWaypoint(
+    geometry_msgs::Point position, geometry_msgs::Point wp,
     geometry_msgs::Point avoid_centerpoint, double avoid_radius);
 
 #endif  // LOCAL_PLANNER_FUNCTIONS_H

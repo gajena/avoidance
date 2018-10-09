@@ -1,10 +1,12 @@
 #include "planner_functions.h"
 
+#include <numeric>
+
 // initialize GridCell message
 void initGridCells(nav_msgs::GridCells *cell) {
   cell->cells.clear();
   cell->header.stamp = ros::Time::now();
-  cell->header.frame_id = "/world";
+  cell->header.frame_id = "/local_origin";
   cell->cell_width = ALPHA_RES;
   cell->cell_height = ALPHA_RES;
   cell->cells = {};
@@ -14,7 +16,7 @@ void initGridCells(nav_msgs::GridCells *cell) {
 void calculateSphere(geometry_msgs::Point &sphere_center, int &sphere_age,
                      geometry_msgs::Point temp_centerpoint,
                      int counter_sphere_points, double sphere_speed) {
-  if (counter_sphere_points > 50) {
+  if (counter_sphere_points > 200) {
     if (sphere_age < 10) {
       tf::Vector3 vec;
       vec.setX(temp_centerpoint.x - sphere_center.x);
@@ -56,12 +58,12 @@ void filterPointCloud(pcl::PointCloud<pcl::PointXYZ> &cropped_cloud,
                       geometry_msgs::Point &temp_sphere_center,
                       double &distance_to_closest_point, int &counter_backoff,
                       int &counter_sphere,
-                      pcl::PointCloud<pcl::PointXYZ> complete_cloud,
+					  std::vector<pcl::PointCloud<pcl::PointXYZ>> complete_cloud,
                       double min_cloud_size, double min_dist_backoff,
                       double sphere_radius, Box histogram_box,
-                      geometry_msgs::Point position) {
-  double min_realsense_dist = 0.2;
-  std::clock_t start_time = std::clock();
+                      geometry_msgs::Point position,
+                      double min_realsense_dist) {
+
   pcl::PointCloud<pcl::PointXYZ>::iterator pcl_it;
   cropped_cloud.points.clear();
   cropped_cloud.width = 0;
@@ -73,34 +75,35 @@ void filterPointCloud(pcl::PointCloud<pcl::PointXYZ> &cropped_cloud,
   temp_sphere_center.y = 0.0;
   temp_sphere_center.z = 0.0;
 
-  for (pcl_it = complete_cloud.begin(); pcl_it != complete_cloud.end();
-       ++pcl_it) {
-    // Check if the point is invalid
-    if (!std::isnan(pcl_it->x) && !std::isnan(pcl_it->y) &&
-        !std::isnan(pcl_it->z)) {
-      if (histogram_box.isPointWithin(pcl_it->x, pcl_it->y, pcl_it->z)) {
-        distance = computeL2Dist(position, pcl_it);
-        if (distance > min_realsense_dist) {
-          cropped_cloud.points.push_back(
-              pcl::PointXYZ(pcl_it->x, pcl_it->y, pcl_it->z));
-          if (distance < distance_to_closest_point) {
-            distance_to_closest_point = distance;
-            closest_point.x = pcl_it->x;
-            closest_point.y = pcl_it->y;
-            closest_point.z = pcl_it->z;
-          }
-          if (distance < min_dist_backoff) {
-            counter_backoff++;
-          }
-          if (distance < sphere_radius + 1.5) {
-            counter_sphere++;
-            temp_sphere_center.x += pcl_it->x;
-            temp_sphere_center.y += pcl_it->y;
-            temp_sphere_center.z += pcl_it->z;
-          }
-        }
-      }
-    }
+  for(int i=0; i<complete_cloud.size(); ++i){
+	  for (pcl_it = complete_cloud[i].begin(); pcl_it != complete_cloud[i].end();
+		   ++pcl_it) {
+		// Check if the point is invalid
+		if (!std::isnan(pcl_it->x) && !std::isnan(pcl_it->y) && !std::isnan(pcl_it->z)) {
+		  if (histogram_box.isPointWithin(pcl_it->x, pcl_it->y, pcl_it->z)) {
+			distance = computeL2Dist(position, pcl_it);
+			if (distance > min_realsense_dist) {
+			  cropped_cloud.points.push_back(
+				  pcl::PointXYZ(pcl_it->x, pcl_it->y, pcl_it->z));
+			  if (distance < distance_to_closest_point) {
+				distance_to_closest_point = distance;
+				closest_point.x = pcl_it->x;
+				closest_point.y = pcl_it->y;
+				closest_point.z = pcl_it->z;
+			  }
+			  if (distance < min_dist_backoff) {
+				counter_backoff++;
+			  }
+			  if (distance < sphere_radius + 1.5) {
+				counter_sphere++;
+				temp_sphere_center.x += pcl_it->x;
+				temp_sphere_center.y += pcl_it->y;
+				temp_sphere_center.z += pcl_it->z;
+			  }
+			}
+		  }
+		}
+	  }
   }
 
   if (counter_sphere > 0) {
@@ -113,8 +116,8 @@ void filterPointCloud(pcl::PointCloud<pcl::PointXYZ> &cropped_cloud,
     temp_sphere_center.z = position.z + 1000;
   }
 
-  cropped_cloud.header.stamp = complete_cloud.header.stamp;
-  cropped_cloud.header.frame_id = complete_cloud.header.frame_id;
+  cropped_cloud.header.stamp = complete_cloud[0].header.stamp;
+  cropped_cloud.header.frame_id = complete_cloud[0].header.frame_id;
   cropped_cloud.height = 1;
   cropped_cloud.width = cropped_cloud.points.size();
   if (cropped_cloud.points.size() <= min_cloud_size) {
@@ -338,8 +341,8 @@ double costFunction(int e, int z, nav_msgs::GridCells path_waypoints,
            pitch_cost_smooth;
   } else {
     cost = yaw_cost + height_change_cost_param_adapted * pitch_cost_up +
-           height_change_cost_param * pitch_cost_down + 0.1 * yaw_cost_smooth +
-           0.1 * pitch_cost_smooth;
+           height_change_cost_param * pitch_cost_down + 0.5 * yaw_cost_smooth +
+           0.5 * pitch_cost_smooth;
   }
 
   return cost;
@@ -361,16 +364,16 @@ void compressHistogramElevation(Histogram &new_hist, Histogram input_hist) {
 // search for free directions in the 2D polar histogram with a moving window
 // approach
 void findFreeDirections(
-    Histogram histogram, double safety_radius,
+    const Histogram &histogram, double safety_radius,
     nav_msgs::GridCells &path_candidates, nav_msgs::GridCells &path_selected,
     nav_msgs::GridCells &path_rejected, nav_msgs::GridCells &path_blocked,
     nav_msgs::GridCells &path_ground, nav_msgs::GridCells path_waypoints,
-    std::vector<float> &cost_path_candidates, geometry_msgs::Point goal,
-    geometry_msgs::PoseStamped position, geometry_msgs::Point position_old,
+    std::vector<float> &cost_path_candidates, const geometry_msgs::Point &goal,
+    const geometry_msgs::PoseStamped &position, const geometry_msgs::Point &position_old,
     double goal_cost_param, double smooth_cost_param,
     double height_change_cost_param_adapted, double height_change_cost_param,
     int e_min_idx, bool over_obstacle, bool only_yawed, int resolution_alpha) {
-  std::clock_t start_time = std::clock();
+
   int n = floor(safety_radius / resolution_alpha);  // safety radius
   int z_dim = 360 / resolution_alpha;
   int e_dim = 180 / resolution_alpha;
@@ -485,8 +488,12 @@ bool calculateCostMap(std::vector<float> cost_path_candidates,
     ROS_WARN("\033[1;31mbold Empty candidates vector!\033[0m\n");
     return 1;
   } else {
-    cv::sortIdx(cost_path_candidates, cost_idx_sorted,
-                CV_SORT_EVERY_ROW + CV_SORT_ASCENDING);
+    cost_idx_sorted.resize(cost_path_candidates.size());
+    std::iota(cost_idx_sorted.begin(), cost_idx_sorted.end(), 0);
+
+    std::sort(cost_idx_sorted.begin(), cost_idx_sorted.end(),
+      [&cost_path_candidates](size_t i1, size_t i2)
+      { return cost_path_candidates[i1] < cost_path_candidates[i2]; });
     return 0;
   }
 }
@@ -514,15 +521,18 @@ void printHistogram(Histogram hist, std::vector<int> z_FOV_idx, int e_FOV_min,
   std::cout << "--------------------------------------\n";
 }
 
-bool getDirectionFromTree(geometry_msgs::Point &p, bool tree_available,
+bool getDirectionFromTree(geometry_msgs::Point &p,
                           std::vector<geometry_msgs::Point> path_node_positions,
-                          geometry_msgs::Point position, bool new_tree) {
-  if (tree_available) {
-    int size = path_node_positions.size();
+                          geometry_msgs::Point position,
+                          geometry_msgs::Point goal) {
+  int size = path_node_positions.size();
+  bool tree_available = true;
 
+  if (size > 0) {
     int min_dist_idx = 0;
     int second_min_dist_idx = 0;
     double min_dist = HUGE_VAL;
+    double second_min_dist = HUGE_VAL;
     double node_distance =
         distance3DCartesian(path_node_positions[0], path_node_positions[1]);
 
@@ -532,11 +542,14 @@ bool getDirectionFromTree(geometry_msgs::Point &p, bool tree_available,
           distance3DCartesian(position, path_node_positions[i]));
       if (distances[i] < min_dist) {
         second_min_dist_idx = min_dist_idx;
+        second_min_dist = min_dist;
         min_dist = distances[i];
         min_dist_idx = i;
+      } else if (distances[i] < second_min_dist) {
+        second_min_dist = distances[i];
+        second_min_dist_idx = i;
       }
     }
-
     int wp_idx = std::min(min_dist_idx, second_min_dist_idx);
     if (min_dist > 3.0 || wp_idx == 0) {
       tree_available = false;
@@ -549,67 +562,58 @@ bool getDirectionFromTree(geometry_msgs::Point &p, bool tree_available,
       double l_frac = l_front / node_distance;
 
       geometry_msgs::Point mean_point;
-      mean_point.x = (1.0 - l_frac) * path_node_positions[wp_idx].x +
-                     l_frac * path_node_positions[wp_idx - 1].x;
-      mean_point.y = (1.0 - l_frac) * path_node_positions[wp_idx].y +
-                     l_frac * path_node_positions[wp_idx - 1].y;
-      mean_point.z = (1.0 - l_frac) * path_node_positions[wp_idx].z +
-                     l_frac * path_node_positions[wp_idx - 1].z;
+      mean_point.x = (1.0 - l_frac) * path_node_positions[wp_idx - 1].x +
+                     l_frac * path_node_positions[wp_idx].x;
+      mean_point.y = (1.0 - l_frac) * path_node_positions[wp_idx - 1].y +
+                     l_frac * path_node_positions[wp_idx].y;
+      mean_point.z = (1.0 - l_frac) * path_node_positions[wp_idx - 1].z +
+                     l_frac * path_node_positions[wp_idx].z;
 
       int wp_e = elevationAnglefromCartesian(mean_point.x, mean_point.y,
                                              mean_point.z, position);
       int wp_z = azimuthAnglefromCartesian(mean_point.x, mean_point.y,
                                            mean_point.z, position);
 
+      int goal_z = azimuthAnglefromCartesian(goal.x, goal.y, goal.z, position);
+
+      double tree_progression = 1.0 - (double(wp_idx) - l_frac) / double(size);
+      double angle_difference =
+          std::abs(indexAngleDifference(wp_z, goal_z)) / 180.0;
+      double goal_weight = tree_progression * angle_difference;
+
       p.x = wp_e;
       p.y = wp_z;
       p.z = 0.0;
     }
-  }
-  if (new_tree) {
-    int size = path_node_positions.size();
-    tree_available = true;
-    int wp_e = elevationAnglefromCartesian(
-        path_node_positions[size - 2].x, path_node_positions[size - 2].y,
-        path_node_positions[size - 2].z, position);
-    int wp_z = azimuthAnglefromCartesian(
-        path_node_positions[size - 2].x, path_node_positions[size - 2].y,
-        path_node_positions[size - 2].z, position);
-
-    p.x = wp_e;
-    p.y = wp_z;
-    p.z = 0.0;
+  } else {
+    tree_available = false;
   }
   return tree_available;
 }
 
-geometry_msgs::Vector3Stamped getSphereAdaptedWaypoint(
-    geometry_msgs::Point position, geometry_msgs::Vector3Stamped wp,
+geometry_msgs::Point getSphereAdaptedWaypoint(
+    geometry_msgs::Point position, geometry_msgs::Point wp,
     geometry_msgs::Point avoid_centerpoint, double avoid_radius) {
-  geometry_msgs::Vector3Stamped wp_adapted = wp;
+  geometry_msgs::Point wp_adapted = wp;
   double sphere_hysteresis_radius = 1.3 * avoid_radius;
-  double dist = sqrt((wp.vector.x - avoid_centerpoint.x) *
-                         (wp.vector.x - avoid_centerpoint.x) +
-                     (wp.vector.y - avoid_centerpoint.y) *
-                         (wp.vector.y - avoid_centerpoint.y) +
-                     (wp.vector.z - avoid_centerpoint.z) *
-                         (wp.vector.z - avoid_centerpoint.z));
+  double dist =
+      sqrt((wp.x - avoid_centerpoint.x) * (wp.x - avoid_centerpoint.x) +
+           (wp.y - avoid_centerpoint.y) * (wp.y - avoid_centerpoint.y) +
+           (wp.z - avoid_centerpoint.z) * (wp.z - avoid_centerpoint.z));
 
   if (dist < sphere_hysteresis_radius) {
     // put waypoint closer to equator
-    if (wp.vector.z < avoid_centerpoint.z) {
-      wp_adapted.vector.z =
-          wp.vector.z + 0.25 * std::abs(wp.vector.z - avoid_centerpoint.z);
+    if (wp.z < avoid_centerpoint.z) {
+      wp_adapted.z = wp.z + 0.25 * std::abs(wp.z - avoid_centerpoint.z);
     } else {
-      wp_adapted.vector.z =
-          wp.vector.z - 0.25 * std::abs(wp.vector.z - avoid_centerpoint.z);
+      wp_adapted.z = wp.z - 0.25 * std::abs(wp.z - avoid_centerpoint.z);
     }
     // increase angle from pole
-    Eigen::Vector3f center_to_wp(wp_adapted.vector.x - avoid_centerpoint.x,
-                                 wp_adapted.vector.y - avoid_centerpoint.y,
-                                 wp_adapted.vector.z - avoid_centerpoint.z);
-    Eigen::Vector2f center_to_wp_2D(wp_adapted.vector.x - avoid_centerpoint.x,
-                                    wp_adapted.vector.y - avoid_centerpoint.y);
+    Eigen::Vector3f center_to_wp(wp_adapted.x - avoid_centerpoint.x,
+                                 wp_adapted.y - avoid_centerpoint.y,
+                                 wp_adapted.z - avoid_centerpoint.z);
+    Eigen::Vector2f center_to_wp_2D(wp_adapted.x - avoid_centerpoint.x,
+                                    wp_adapted.y - avoid_centerpoint.y);
     Eigen::Vector2f pose_to_center_2D(position.x - avoid_centerpoint.x,
                                       position.y - avoid_centerpoint.y);
     center_to_wp_2D = center_to_wp_2D.normalized();
@@ -618,7 +622,15 @@ geometry_msgs::Vector3Stamped getSphereAdaptedWaypoint(
                        center_to_wp_2D[1] * pose_to_center_2D[1];
     Eigen::Vector2f n(center_to_wp_2D[0] - cos_theta * pose_to_center_2D[0],
                       center_to_wp_2D[1] - cos_theta * pose_to_center_2D[1]);
-    n = n.normalized();
+
+    double mag_n = sqrt(n[0] * n[0] + n[1] * n[1]);
+    if (mag_n > 0) {
+      n[0] = n[0] / mag_n;
+      n[1] = n[1] / mag_n;
+    } else {
+      n[0] = 0;
+      n[1] = 0;
+    }
     double cos_new_theta = 0.9 * cos_theta;
     double sin_new_theta = sin(acos(cos_new_theta));
     Eigen::Vector2f center_to_wp_2D_new(
@@ -634,9 +646,9 @@ geometry_msgs::Vector3Stamped getSphereAdaptedWaypoint(
     // hysteresis
     if (dist < avoid_radius) {
       center_to_wp_new *= avoid_radius;
-      wp_adapted.vector.x = avoid_centerpoint.x + center_to_wp_new[0];
-      wp_adapted.vector.y = avoid_centerpoint.y + center_to_wp_new[1];
-      wp_adapted.vector.z = avoid_centerpoint.z + center_to_wp_new[2];
+      wp_adapted.x = avoid_centerpoint.x + center_to_wp_new[0];
+      wp_adapted.y = avoid_centerpoint.y + center_to_wp_new[1];
+      wp_adapted.z = avoid_centerpoint.z + center_to_wp_new[2];
       ROS_INFO("\033[1;36m Inside sphere \n \033[0m");
     } else {
       center_to_wp_new *= dist;
@@ -644,15 +656,15 @@ geometry_msgs::Vector3Stamped getSphereAdaptedWaypoint(
           (dist - avoid_radius) /
           (sphere_hysteresis_radius -
            avoid_radius);  // 1 at hysteresis rad, 0 at avoid rad
-      wp_adapted.vector.x = (1.0 - radius_percentage) *
-                                (avoid_centerpoint.x + center_to_wp_new[0]) +
-                            radius_percentage * wp_adapted.vector.x;
-      wp_adapted.vector.y = (1.0 - radius_percentage) *
-                                (avoid_centerpoint.y + center_to_wp_new[1]) +
-                            radius_percentage * wp_adapted.vector.y;
-      wp_adapted.vector.z = (1.0 - radius_percentage) *
-                                (avoid_centerpoint.z + center_to_wp_new[2]) +
-                            radius_percentage * wp_adapted.vector.z;
+      wp_adapted.x = (1.0 - radius_percentage) *
+                         (avoid_centerpoint.x + center_to_wp_new[0]) +
+                     radius_percentage * wp_adapted.x;
+      wp_adapted.y = (1.0 - radius_percentage) *
+                         (avoid_centerpoint.y + center_to_wp_new[1]) +
+                     radius_percentage * wp_adapted.y;
+      wp_adapted.z = (1.0 - radius_percentage) *
+                         (avoid_centerpoint.z + center_to_wp_new[2]) +
+                     radius_percentage * wp_adapted.z;
       ROS_INFO("\033[1;36m Inside sphere hysteresis \n \033[0m");
     }
   }

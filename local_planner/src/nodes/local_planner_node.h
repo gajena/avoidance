@@ -6,6 +6,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <atomic>
+#include <condition_variable>
 
 #include <geometry_msgs/Point.h>
 #include <geometry_msgs/PoseArray.h>
@@ -32,19 +34,31 @@
 #include "avoidance/common_ros.h"
 #include "local_planner.h"
 #include "planner_functions.h"
+#include "rviz_world_loader.h"
+#include "waypoint_generator.h"
+
+
+struct cameraData {
+	std::string topic_;
+	ros::Subscriber pointcloud_sub_;
+	sensor_msgs::PointCloud2 newest_cloud_msg_;
+	bool received_;
+};
 
 class LocalPlannerNode {
  public:
   LocalPlannerNode();
   ~LocalPlannerNode();
 
-  bool point_cloud_updated_;
-  bool never_run_;
-  bool tree_available_ = false;
-  bool write_cloud_ = false;
+  std::string world_path_;
+  bool never_run_ = true;
   bool position_received_ = false;
 
+  std::atomic<bool> should_exit_{false};
+
   double curr_yaw_;
+
+  std::vector<cameraData> cameras_;
 
   ros::CallbackQueue pointcloud_queue_;
   ros::CallbackQueue main_queue_;
@@ -52,6 +66,10 @@ class LocalPlannerNode {
   std::vector<geometry_msgs::Point> path_node_positions_;
   geometry_msgs::PoseStamped hover_point_;
   geometry_msgs::PoseStamped newest_pose_;
+  geometry_msgs::PoseStamped last_pose_;
+  geometry_msgs::Point newest_waypoint_position_;
+  geometry_msgs::Point last_waypoint_position_;
+  geometry_msgs::PoseStamped goal_msg_;
 
   const ros::Duration pointcloud_timeout_hover_ = ros::Duration(0.4);
   const ros::Duration pointcloud_timeout_land_ = ros::Duration(10);
@@ -59,38 +77,51 @@ class LocalPlannerNode {
   ros::Time last_wp_time_;
 
   LocalPlanner local_planner_;
+  WaypointGenerator wp_generator_;
 
-  ros::Publisher log_name_pub_;
+  ros::Publisher world_pub_;
   ros::Publisher current_waypoint_pub_;
-  ros::Publisher mavros_waypoint_pub_;
+  ros::Publisher mavros_pos_setpoint_pub_;
+  ros::Publisher mavros_vel_setpoint_pub_;
   ros::Publisher mavros_obstacle_free_path_pub_;
   ros::Publisher mavros_obstacle_distance_pub_;
   ros::Publisher waypoint_pub_;
   ros::ServiceClient mavros_set_mode_client_;
   tf::TransformListener tf_listener_;
 
-  std::timed_mutex variable_mutex_;
-  std::timed_mutex publisher_mutex_;
+  std::mutex running_mutex_; ///< guard against concurrent access to input & output data (point cloud, position, ...)
 
-  void publishSetpoint(const geometry_msgs::PoseStamped wp, double mode);
+  std::mutex data_ready_mutex_;
+  bool data_ready_ = false;
+  std::condition_variable data_ready_cv_;
+
+  void publishSetpoint(const geometry_msgs::Twist& wp,
+                       waypoint_choice& waypoint_type);
   void threadFunction();
-  void getInterimWaypoint(geometry_msgs::PoseStamped &wp);
+  void getInterimWaypoint(geometry_msgs::PoseStamped &wp,
+                          geometry_msgs::Twist &wp_vel);
+  bool canUpdatePlannerInfo();
   void updatePlannerInfo();
+  int numReceivedClouds();
   void transformPoseToTrajectory(mavros_msgs::Trajectory &obst_avoid,
                                  geometry_msgs::PoseStamped pose);
+  void transformVelocityToTrajectory(mavros_msgs::Trajectory &obst_avoid,
+                                     geometry_msgs::Twist vel);
   void fillUnusedTrajectoryPoint(mavros_msgs::PositionTarget &point);
+  void publishWaypoints(bool hover);
+
+  const ros::NodeHandle &nodeHandle() const { return nh_; }
 
  private:
   ros::NodeHandle nh_;
-
-  nav_msgs::Path path_actual_;
+  avoidance::LocalPlannerNodeConfig rqt_param_config_;
 
   double avoid_radius_;
   geometry_msgs::Point avoid_centerpoint_;
   bool use_sphere_;
+  int path_length_ = 0;
 
   // Subscribers
-  ros::Subscriber pointcloud_sub_;
   ros::Subscriber pose_sub_;
   ros::Subscriber velocity_sub_;
   ros::Subscriber state_sub_;
@@ -108,7 +139,8 @@ class LocalPlannerNode {
   ros::Publisher height_map_pub_;
   ros::Publisher cached_pointcloud_pub_;
   ros::Publisher marker_pub_;
-  ros::Publisher path_pub_;
+  ros::Publisher path_actual_pub_;
+  ros::Publisher path_waypoint_pub_;
   ros::Publisher marker_rejected_pub_;
   ros::Publisher marker_blocked_pub_;
   ros::Publisher marker_candidates_pub_;
@@ -119,6 +151,7 @@ class LocalPlannerNode {
   ros::Publisher ground_est_pub_;
   ros::Publisher avoid_sphere_pub_;
   ros::Publisher takeoff_pose_pub_;
+  ros::Publisher offboard_pose_pub_;
   ros::Publisher initial_height_pub_;
   ros::Publisher complete_tree_pub_;
   ros::Publisher tree_path_pub_;
@@ -129,34 +162,32 @@ class LocalPlannerNode {
   std::vector<float> algo_time;
 
   geometry_msgs::TwistStamped vel_msg_;
-  bool armed_, offboard_, new_goal_;
-  geometry_msgs::PoseStamped goal_msg_;
-
-  std::string depth_points_topic_;
+  bool armed_, offboard_, mission_, new_goal_;
 
   dynamic_reconfigure::Server<avoidance::LocalPlannerNodeConfig> server_;
 
   void dynamicReconfigureCallback(avoidance::LocalPlannerNodeConfig &config,
                                   uint32_t level);
-  void positionCallback(const geometry_msgs::PoseStamped msg);
-  void pointCloudCallback(const sensor_msgs::PointCloud2 msg);
-  void velocityCallback(const geometry_msgs::TwistStamped msg);
-  void stateCallback(const mavros_msgs::State msg);
+  void initializeCameraSubscribers(std::vector<std::string> &camera_topics);
+  void positionCallback(const geometry_msgs::PoseStamped& msg);
+  void pointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& msg, int index);
+  void velocityCallback(const geometry_msgs::TwistStamped& msg);
+  void stateCallback(const mavros_msgs::State& msg);
   void readParams();
-  void publishAll();
-  void publishPath(const geometry_msgs::PoseStamped msg);
+  void publishPlannerData();
+  void publishPaths();
   void initMarker(visualization_msgs::MarkerArray *marker,
-                  nav_msgs::GridCells path, float red, float green, float blue);
-  void publishMarkerBlocked(nav_msgs::GridCells path_blocked);
-  void publishMarkerRejected(nav_msgs::GridCells path_rejected);
-  void publishMarkerCandidates(nav_msgs::GridCells path_candidates);
-  void publishMarkerSelected(nav_msgs::GridCells path_selected);
-  void publishMarkerGround(nav_msgs::GridCells path_ground);
-  void publishMarkerFOV(nav_msgs::GridCells FOV_cells);
+                  nav_msgs::GridCells& path, const float red, const float green, const float blue);
+  void publishMarkerBlocked(nav_msgs::GridCells& path_blocked);
+  void publishMarkerRejected(nav_msgs::GridCells& path_rejected);
+  void publishMarkerCandidates(nav_msgs::GridCells& path_candidates);
+  void publishMarkerSelected(nav_msgs::GridCells& path_selected);
+  void publishMarkerGround(nav_msgs::GridCells& path_ground);
+  void publishMarkerFOV(nav_msgs::GridCells& FOV_cells);
   void clickedPointCallback(const geometry_msgs::PointStamped &msg);
   void clickedGoalCallback(const geometry_msgs::PoseStamped &msg);
   void fcuInputGoalCallback(const mavros_msgs::Trajectory &msg);
-  ;
+
   void printPointInfo(double x, double y, double z);
   void publishGoal();
   void publishBox();
@@ -164,7 +195,6 @@ class LocalPlannerNode {
   void publishGround();
   void publishReachHeight();
   void publishTree();
-  void publishWaypoints();
 };
 
 #endif  // LOCAL_PLANNER_LOCAL_PLANNER_NODE_H

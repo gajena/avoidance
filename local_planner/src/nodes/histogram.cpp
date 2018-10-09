@@ -1,7 +1,7 @@
 #include "histogram.h"
 
 Histogram::Histogram(const int res)
-    : resolution{res}, z_dim{360.0 / resolution}, e_dim{180.0 / resolution} {
+    : resolution{res}, z_dim{360 / resolution}, e_dim{180 / resolution} {
   bin.resize(e_dim);
   age.resize(e_dim);
   dist.resize(e_dim);
@@ -14,24 +14,6 @@ Histogram::Histogram(const int res)
 }
 
 Histogram::~Histogram() {}
-
-double Histogram::get_bin(int x, int y) {
-  wrapIndex(x, y);
-  return bin[x][y];
-}
-double Histogram::get_age(int x, int y) {
-  wrapIndex(x, y);
-  return age[x][y];
-}
-
-double Histogram::get_dist(int x, int y) {
-  wrapIndex(x, y);
-  return dist[x][y];
-}
-
-void Histogram::set_bin(int x, int y, double value) { bin[x][y] = value; }
-void Histogram::set_age(int x, int y, double value) { age[x][y] = value; }
-void Histogram::set_dist(int x, int y, double value) { dist[x][y] = value; }
 
 void Histogram::upsample() {
   resolution = resolution / 2;
@@ -122,17 +104,3 @@ void Histogram::setZero() {
   }
 }
 
-void Histogram::wrapIndex(int &x, int &y){
-  while(x<0){
-	  x += e_dim;
-  }
-  while(x>e_dim-1){
-	  x -= e_dim;
-  }
-  while(y<0){
-	  y += z_dim;
-  }
-  while(y>z_dim-1){
-	  y -= z_dim;
-  }
-}

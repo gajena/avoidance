@@ -13,35 +13,37 @@ void StarPlanner::dynamicReconfigureSetStarParams(
   tree_discount_factor_ = config.tree_discount_factor_;
 }
 
-void StarPlanner::setParams(double min_cloud_size, double min_dist_backoff,
-                            nav_msgs::GridCells path_waypoints, double curr_yaw,
-                            bool use_ground_detection) {
+void StarPlanner::setParams(const double& min_cloud_size, const double& min_dist_backoff,
+                            const nav_msgs::GridCells& path_waypoints, const double& curr_yaw,
+                            bool use_ground_detection, const double& min_realsense_dist) {
+
   path_waypoints_ = path_waypoints;
   curr_yaw_ = curr_yaw;
   use_ground_detection_ = use_ground_detection;
   min_cloud_size_ = min_cloud_size;
   min_dist_backoff_ = min_dist_backoff;
+  min_realsense_dist_ = min_realsense_dist;
 }
 
-void StarPlanner::setPose(geometry_msgs::PoseStamped pose) { pose_ = pose; }
+void StarPlanner::setPose(const geometry_msgs::PoseStamped& pose) { pose_ = pose; }
 
-void StarPlanner::setCloud(pcl::PointCloud<pcl::PointXYZ> complete_cloud) {
+void StarPlanner::setCloud(const std::vector<pcl::PointCloud<pcl::PointXYZ>>& complete_cloud) {
   complete_cloud_ = complete_cloud;
 }
 
-void StarPlanner::setBoxSize(Box histogram_box_size) {
+void StarPlanner::setBoxSize(const Box& histogram_box_size) {
   histogram_box_size_ = histogram_box_size;
 }
 
-void StarPlanner::setGoal(geometry_msgs::Point goal) {
+void StarPlanner::setGoal(const geometry_msgs::Point& goal) {
   goal_ = goal;
   tree_age_ = 1000;
 }
 
-void StarPlanner::setCostParams(double goal_cost_param,
-                                double smooth_cost_param,
-                                double height_change_cost_param_adapted,
-                                double height_change_cost_param) {
+void StarPlanner::setCostParams(const double& goal_cost_param,
+                                const double& smooth_cost_param,
+                                const double& height_change_cost_param_adapted,
+                                const double& height_change_cost_param) {
   goal_cost_param_ = goal_cost_param;
   smooth_cost_param_ = smooth_cost_param;
   height_change_cost_param_adapted_ = height_change_cost_param_adapted;
@@ -49,9 +51,9 @@ void StarPlanner::setCostParams(double goal_cost_param,
 }
 
 void StarPlanner::setReprojectedPoints(
-    pcl::PointCloud<pcl::PointXYZ> reprojected_points,
-    std::vector<double> reprojected_points_age,
-    std::vector<double> reprojected_points_dist) {
+    const pcl::PointCloud<pcl::PointXYZ>& reprojected_points,
+    const std::vector<double>& reprojected_points_age,
+    const std::vector<double>& reprojected_points_dist) {
   reprojected_points_ = reprojected_points;
   reprojected_points_age_ = reprojected_points_age;
   reprojected_points_dist_ = reprojected_points_dist;
@@ -69,7 +71,7 @@ double StarPlanner::treeCostFunction(int node_number) {
 
   double target_cost =
       2 * indexAngleDifference(z, goal_z) +
-      50 * indexAngleDifference(e, goal_e);  // include effective direction?
+      20 * indexAngleDifference(e, goal_e);  // include effective direction?
   double turning_cost =
       1 *
       indexAngleDifference(z, tree_[0].yaw_);  // maybe include pitching cost?
@@ -78,7 +80,10 @@ double StarPlanner::treeCostFunction(int node_number) {
   int last_z = tree_[origin].last_z_;
 
   double smooth_cost =
-      2 * indexAngleDifference(z, last_z) + 5 * indexAngleDifference(e, last_e);
+      5*(2 * indexAngleDifference(z, last_z) + 5 * indexAngleDifference(e, last_e));
+  if(indexAngleDifference(z, last_z) > 100){
+	  smooth_cost = HUGE_VAL;
+  }
 
   double smooth_cost_to_old_tree = 0.0;
   if (tree_age_ < 10) {
@@ -163,10 +168,7 @@ void StarPlanner::buildLookAheadTree() {
                      distance_to_closest_point, backoff_points_counter,
                      sphere_points_counter, complete_cloud_, min_cloud_size_,
                      min_dist_backoff_, avoid_radius, histogram_box_,
-                     origin_position);
-    double safety_radius = adaptSafetyMarginHistogram(
-        distance_to_closest_point, cropped_cloud.points.size(),
-        min_cloud_size_);
+                     origin_position, min_realsense_dist_);
 
     if (origin != 0 && backoff_points_counter > 20 &&
         cropped_cloud.points.size() > 160) {
@@ -224,17 +226,6 @@ void StarPlanner::buildLookAheadTree() {
       } else {
         // insert new nodes
         int depth = tree_[origin].depth_ + 1;
-
-        int goal_z = floor(
-            atan2(goal_.x - origin_position.x, goal_.y - origin_position.y) *
-            180.0 / M_PI);  // azimuthal angle
-        int goal_e = floor(atan((goal_.z - origin_position.z) /
-                                sqrt(pow((goal_.x - origin_position.x), 2) +
-                                     pow((goal_.y - origin_position.y), 2))) *
-                           180.0 / M_PI);
-        int goal_e_idx = (goal_e - ALPHA_RES + 90) / ALPHA_RES;
-        int goal_z_idx = (goal_z - ALPHA_RES + 180) / ALPHA_RES;
-
         int childs = 0;
         for (int i = 0; i < (int)path_candidates.cells.size(); i++) {
           int e = path_candidates.cells[cost_idx_sorted[i]].x;
@@ -301,6 +292,6 @@ void StarPlanner::buildLookAheadTree() {
   path_node_origins_.push_back(0);
   tree_age_ = 0;
 
-  ROS_INFO("Tree calculated in %2.2fms.",
+  ROS_INFO("\033[0;35m[SP]Tree calculated in %2.2fms.\033[0m",
            (std::clock() - start_time) / (double)(CLOCKS_PER_SEC / 1000));
 }

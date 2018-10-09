@@ -190,6 +190,11 @@ void GlobalPlannerNode::positionCallback(
     popNextGoal();
   }
 
+  // If the current cell is blocked, try finding a path again
+  if(global_planner_.current_cell_blocked_){
+	  planPath();
+  }
+
   // Print and publish info
   if (is_in_goal && !waypoints_.empty()) {
     ROS_INFO("Reached current goal %s, %d goals left\n\n",
@@ -419,7 +424,7 @@ int main(int argc, char** argv) {
         global_planner_node.waypoints_.push_back(global_planner::Cell(x, y, z));
       }
       wp_file.close();
-      ROS_INFO("  Read %d waypoints.", global_planner_node.waypoints_.size());
+      ROS_INFO("  Read %d waypoints.", static_cast<int>(global_planner_node.waypoints_.size()));
     } else {
       ROS_ERROR_STREAM("Unable to open goal file: " << args.at(1));
       return -1;

@@ -47,8 +47,6 @@
 #include <nav_msgs/GridCells.h>
 #include <nav_msgs/Path.h>
 
-#include <opencv2/imgproc/imgproc.hpp>
-
 #include <dynamic_reconfigure/server.h>
 #include <local_planner/LocalPlannerNodeConfig.h>
 
@@ -91,7 +89,7 @@ class GroundDetector {
   GroundDetector(const GroundDetector &detector);
   ~GroundDetector();
 
-  void detectGround(pcl::PointCloud<pcl::PointXYZ> &complete_cloud);
+  void detectGround(std::vector<pcl::PointCloud<pcl::PointXYZ>> &complete_cloud);
   void setParams(double min_dist_to_ground, double min_cloud_size);
   void setPose(geometry_msgs::PoseStamped pose);
   void fitPlane();
